@@ -38,4 +38,5 @@ variable "openai_api_key" {
   description = "OpenAI API key for GPT-5 integration"
   type        = string
   sensitive   = true
+  default     = ""
 }
