@@ -1,11 +1,17 @@
 import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
+import OpenAI from 'openai';
 import { StoryTextEvent, StoryMetaDataStatus } from './index.types';
 
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env['OPENAI_API_KEY'],
+});
 
 export const handler = async (event: StoryTextEvent): Promise<SQSBatchResponse> => {
   const batchItemFailures: string[] = [];
@@ -58,11 +64,14 @@ async function processMessage(record: any): Promise<void> {
     const storyPrompt = message.story_prompt;
     console.log("Story Prompt: ", storyPrompt);
     
-    // Process the text (placeholder for actual text processing logic)
-    await processText(storyPrompt);
+    // Process the text with OpenAI GPT-5
+    const processedText = await processText(storyPrompt);
     
     // Store the processed result in DynamoDB
     await setMetadataRecordToInProgress(message.id);
+    
+    // Log the processing result
+    console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
     
     console.log(`Message ${record.messageId} processed successfully`);
     
@@ -73,21 +82,30 @@ async function processMessage(record: any): Promise<void> {
 }
 
 async function processText(text: string): Promise<string> {
-  // Placeholder for actual text processing logic
-  // This could include:
-  // - Text analysis
-  // - Content filtering
-  // - Formatting
-  // - Sentiment analysis
-  // - etc.
-  
-  console.log(`Processing text: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
-  
-  // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 100));
-  
-  // Return processed result (for now, just uppercase the text)
-  return text.toUpperCase();
+  try {
+    console.log(`Processing text with OpenAI GPT-5: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5",
+      messages: [
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      max_tokens: 1000,
+      temperature: 0.7
+    });
+    
+    const processedText = completion.choices[0]?.message?.content || text;
+    console.log(`OpenAI response received: ${processedText.substring(0, 100)}${processedText.length > 100 ? '...' : ''}`);
+    
+    return processedText;
+  } catch (error) {
+    console.error('Error calling OpenAI API:', error);
+    // Fallback to original text if OpenAI call fails
+    return text;
+  }
 }
 
 async function setMetadataRecordToInProgress(id: string): Promise<void> {

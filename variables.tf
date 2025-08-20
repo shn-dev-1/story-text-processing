@@ -33,3 +33,9 @@ variable "sqs_batch_size" {
   type        = number
   default     = 1
 }
+
+variable "openai_api_key" {
+  description = "OpenAI API key for GPT-5 integration"
+  type        = string
+  sensitive   = true
+}

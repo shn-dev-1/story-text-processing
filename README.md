@@ -90,10 +90,19 @@ The Lambda function processes SQS messages with the following structure:
 }
 ```
 
+### OpenAI Integration
+
+The function integrates with OpenAI GPT-5 to process text content:
+- **Model**: GPT-5
+- **Max Tokens**: 1000
+- **Temperature**: 0.7
+- **Fallback**: If OpenAI API call fails, returns original text
+
 ## Environment Variables
 
 - `NODE_ENV`: Environment (production)
 - `DYNAMODB_TABLE`: Name of the story-metadata DynamoDB table
+- `OPENAI_API_KEY`: OpenAI API key for GPT-5 integration
 
 ## DynamoDB Tables
 
