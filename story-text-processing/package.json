@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc",
+    "build": "tsc && cp src/system_message.txt dist/",
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "package": "npm run build && cd dist && zip -r ../story_text_processing_lambda_function.zip .",

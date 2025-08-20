@@ -3,6 +3,8 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
 import OpenAI from 'openai';
 import { StoryTextEvent, StoryMetaDataStatus } from './index.types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
@@ -12,6 +14,9 @@ const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
 const openai = new OpenAI({
   apiKey: process.env['OPENAI_API_KEY'],
 });
+
+// Load system message
+const systemMessage = fs.readFileSync(path.join(__dirname, 'system_message.txt'), 'utf8');
 
 export const handler = async (event: StoryTextEvent): Promise<SQSBatchResponse> => {
   const batchItemFailures: string[] = [];
@@ -89,11 +94,14 @@ async function processText(text: string): Promise<string> {
       model: "gpt-5",
       messages: [
         {
+          role: "system",
+          content: systemMessage
+        },
+        {
           role: "user",
           content: text
         }
       ],
-      max_tokens: 1000,
       temperature: 0.7
     });
     
