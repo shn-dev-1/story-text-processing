@@ -70,15 +70,17 @@ async function processMessage(record: any): Promise<void> {
     console.log("Story Prompt: ", storyPrompt);
     
     // Process the text with OpenAI GPT-5
-    const processedText = await processText(storyPrompt);
-    
-    // Store the processed result in DynamoDB
-    await setMetadataRecordToInProgress(message.id);
-    
-    // Log the processing result
-    console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
-    
-    console.log(`Message ${record.messageId} processed successfully`);
+    try{
+        const processedText = await processText(storyPrompt);
+        await updateStoryMetadataRecord(message.id, StoryMetaDataStatus.IN_PROGRESS);
+        // Log the processing result
+        console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
+
+        console.log(`Message ${record.messageId} processed successfully`);
+    } catch (error) {
+        console.error('Error processing text:', error);
+        await updateStoryMetadataRecord(message.id, StoryMetaDataStatus.FAILED);
+    }
     
   } catch (error) {
     console.error(`Error processing message ${record.messageId}:`, error);
@@ -87,7 +89,6 @@ async function processMessage(record: any): Promise<void> {
 }
 
 async function processText(text: string): Promise<string> {
-  try {
     console.log(`Processing text with OpenAI GPT-5: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
     
     const completion = await openai.chat.completions.create({
@@ -108,14 +109,9 @@ async function processText(text: string): Promise<string> {
     console.log(`OpenAI response received: ${processedText.substring(0, 100)}${processedText.length > 100 ? '...' : ''}`);
     
     return processedText;
-  } catch (error) {
-    console.error('Error calling OpenAI API:', error);
-    // Fallback to original text if OpenAI call fails
-    return text;
-  }
 }
 
-async function setMetadataRecordToInProgress(id: string): Promise<void> {
+async function updateStoryMetadataRecord(id: string, status: StoryMetaDataStatus): Promise<void> {
   const timestamp = new Date().toISOString();
   
   const dynamoParams: UpdateCommandInput = {
@@ -130,7 +126,7 @@ async function setMetadataRecordToInProgress(id: string): Promise<void> {
     },
     ExpressionAttributeValues: {
       ':date_updated': timestamp,
-      ':status': StoryMetaDataStatus.IN_PROGRESS,
+      ':status': status,
     }
   };
   

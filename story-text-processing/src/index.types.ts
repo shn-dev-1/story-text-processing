@@ -18,7 +18,8 @@ export enum StoryMetaDataStatus {
   PENDING = 'PENDING',
   IN_PROGRESS = 'IN_PROGRESS',
   POST_PROCESSING = 'POST_PROCESSING',
-  COMPLETED = 'COMPLETED'
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED'
 }
 
 export interface StoryMetaDataDDBItem {
