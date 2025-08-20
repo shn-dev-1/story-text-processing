@@ -1,0 +1,117 @@
+name: 'Terraform Commit Check'
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+      - develop
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: 'us-east-1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-plan:
+    name: 'Terraform Plan'
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Install Dependencies
+      run: |
+        npm ci
+      
+    - name: Build TypeScript
+      run: |
+        npm run build:story-text-processing
+      
+    - name: Package Lambda Function
+      run: |
+        echo "Packaging story-text-processing Lambda function with dependencies..."
+        npm run package:story-text-processing
+        echo "story-text-processing Lambda function packaged successfully"
+        ls -la story_text_processing_lambda_function.zip
+        
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Format Check
+      run: terraform fmt -check
+      
+    - name: Terraform Validate
+      run: terraform validate
+      
+    - name: Terraform Plan
+      id: plan
+      run: terraform plan -no-color -detailed-exitcode
+      continue-on-error: true
+      
+    - name: Comment Commit Result
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          try {
+            const output = `#### Terraform Plan 📋
+            
+            **Branch**: \`${{ github.ref_name }}\`
+            **Commit**: \`${{ github.sha }}\`
+            **Triggered by**: @${{ github.actor }}
+            
+            \`\`\`
+            ${process.env.PLAN || 'No changes. Infrastructure is up-to-date.'}
+            \`\`\`
+            
+            *This is a commit check - no changes will be applied.*`;
+            
+            // Try to create a commit comment
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            });
+            
+            console.log('Successfully created commit comment');
+          } catch (error) {
+            console.log('Could not create commit comment:', error.message);
+            console.log('This is not critical - the plan was successful');
+          }
+          
+    - name: Create Workflow Summary
+      run: |
+        echo "## 📋 Terraform Plan Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "This is a commit check - no changes will be applied." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,28 @@
+{
+  "name": "story-text-processing",
+  "version": "1.0.0",
+  "description": "Repository for managing AWS Lambda function that processes text from SQS",
+  "main": "index.js",
+  "scripts": {
+    "build:story-text-processing": "cd story-text-processing && npm run build",
+    "package:story-text-processing": "cd story-text-processing && npm run package:lambda",
+    "clean:story-text-processing": "cd story-text-processing && npm run clean",
+    "install:story-text-processing": "cd story-text-processing && npm ci",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "sqs",
+    "story-text-processing",
+    "terraform"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "workspaces": [
+    "story-text-processing"
+  ]
+}

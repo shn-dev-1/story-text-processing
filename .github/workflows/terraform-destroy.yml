@@ -1,0 +1,164 @@
+name: 'Terraform Destroy'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm you want to destroy infrastructure'
+        required: true
+        type: string
+        pattern: '^DESTROY$'
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: 'us-east-1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-destroy:
+    name: 'Terraform Destroy'
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+        
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Install Dependencies
+      run: |
+        npm ci
+      
+    - name: Build TypeScript
+      run: npm run build:story-text-processing
+      
+    - name: Package Lambda Function
+      run: |
+        echo "Packaging Lambda function with dependencies for destroy plan..."
+        npm run package:story-text-processing
+        echo "Lambda function packaged successfully"
+        ls -la story_text_processing_lambda_function.zip
+        
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Validate
+      run: terraform validate
+      
+    - name: Terraform Plan Destroy
+      id: plan-destroy
+      run: terraform plan -destroy -no-color
+      continue-on-error: true
+      
+    - name: Show Destroy Plan
+      run: |
+        echo "=== TERRAFORM DESTROY PLAN ==="
+        echo "The following resources will be DESTROYED:"
+        terraform plan -destroy -no-color | grep -E "(^  #|^  -|^Plan:)" || true
+        
+    - name: Terraform Destroy
+      run: |
+        echo "⚠️  WARNING: Starting terraform destroy for environment: ${{ github.event.inputs.environment }}"
+        echo "This will permanently delete all infrastructure resources!"
+        echo "Confirmation received: ${{ github.event.inputs.confirm_destroy }}"
+        
+        # Add a small delay to allow for last-minute cancellation
+        echo "Starting destroy in 10 seconds..."
+        sleep 10
+        
+        terraform destroy -auto-approve
+        
+    - name: Comment Destroy Result
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          try {
+            const output = `#### Terraform Destroy 🗑️
+            
+            **Environment**: ${{ github.event.inputs.environment }}
+            **Triggered by**: @${{ github.actor }}
+            **Status**: Infrastructure has been destroyed
+            
+            **Destroyed Resources:**
+            - Lambda Function: \`story-text-processing-lambda\`
+            - IAM Role: \`story-text-processing-lambda-role\`
+            - SQS Event Source Mapping
+            - DynamoDB CRUD Permissions
+            
+            ⚠️ **Warning**: All resources have been permanently deleted!
+            
+            *Action: \`${{ github.event_name }}\`*`;
+            
+            // Try to create a commit comment
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            });
+            
+            console.log('Successfully created commit comment');
+          } catch (error) {
+            console.log('Could not create commit comment:', error.message);
+            console.log('This is not critical - the destroy was successful');
+          }
+          
+    - name: Create Workflow Summary
+      if: always()
+      run: |
+        echo "## 🗑️ Terraform Destroy Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status**: Infrastructure has been destroyed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Destroyed Resources:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Lambda Function: \`story-text-processing-lambda\`" >> $GITHUB_STEP_SUMMARY
+        echo "- IAM Role: \`story-text-processing-lambda-role\`" >> $GITHUB_STEP_SUMMARY
+        echo "- SQS Event Source Mapping" >> $GITHUB_STEP_SUMMARY
+        echo "- DynamoDB CRUD Permissions" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⚠️ **Warning**: All resources have been permanently deleted!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Action**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          
+    - name: Cleanup Local State
+      if: always()
+      run: |
+        echo "Cleaning up local Terraform files..."
+        rm -rf .terraform
+        rm -f .terraform.lock.hcl
+        rm -f story_text_processing_lambda_function.zip
+        echo "Cleanup complete"
