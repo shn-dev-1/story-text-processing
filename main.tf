@@ -59,7 +59,7 @@ resource "aws_lambda_function" "story_text_processing_lambda" {
   handler          = "index.handler"
   source_code_hash = data.archive_file.story_text_processing_lambda_zip.output_base64sha256
   runtime          = "nodejs18.x"
-  timeout          = 180
+  timeout          = 300
   memory_size      = 128
 
   environment {
