@@ -64,8 +64,8 @@ resource "aws_lambda_function" "story_text_processing_lambda" {
 
   environment {
     variables = {
-      NODE_ENV       = "production"
-      STORY_METADATA_DYNAMODB_TABLE = data.aws_dynamodb_table.story_metadata.name
+      NODE_ENV                         = "production"
+      STORY_METADATA_DYNAMODB_TABLE    = data.aws_dynamodb_table.story_metadata.name
       STORY_VIDEO_TASKS_DYNAMODB_TABLE = data.aws_dynamodb_table.story_video_tasks.name
     }
   }
