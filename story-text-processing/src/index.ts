@@ -1,7 +1,7 @@
-import { SQSEvent, SQSBatchResponse } from 'aws-lambda';
+import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, PutCommandInput, UpdateCommand, UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
-import { StoryTextEvent, StoryTextResponse, DynamoDBItem } from './index.types';
+import { DynamoDBDocumentClient, PutCommand, PutCommandInput } from "@aws-sdk/lib-dynamodb";
+import { StoryTextEvent } from './index.types';
 
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
@@ -107,33 +107,6 @@ async function storeInDynamoDB(originalPayload: string, processedResult: string,
     console.log(`Data stored in DynamoDB successfully with ID: ${itemId}`);
   } catch (error) {
     console.error('Error storing data in DynamoDB:', error);
-    throw error;
-  }
-}
-
-// Optional: Function to update existing records
-async function updateDynamoDBRecord(itemId: string, updates: Partial<DynamoDBItem>): Promise<void> {
-  const updateParams: UpdateCommandInput = {
-    TableName: process.env['DYNAMODB_TABLE'],
-    Key: { id: itemId },
-    UpdateExpression: 'SET #status = :status, #processedAt = :processedAt, #processingResult = :processingResult',
-    ExpressionAttributeNames: {
-      '#status': 'status',
-      '#processedAt': 'processedAt',
-      '#processingResult': 'processingResult'
-    },
-    ExpressionAttributeValues: {
-      ':status': updates.status || 'updated',
-      ':processedAt': updates.processedAt || new Date().toISOString(),
-      ':processingResult': updates.processingResult || ''
-    }
-  };
-  
-  try {
-    await dynamodb.send(new UpdateCommand(updateParams));
-    console.log(`DynamoDB record updated successfully: ${itemId}`);
-  } catch (error) {
-    console.error('Error updating DynamoDB record:', error);
     throw error;
   }
 }

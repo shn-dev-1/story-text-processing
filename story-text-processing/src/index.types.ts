@@ -1,16 +1,8 @@
-import { SQSEvent, SQSRecord, SQSBatchResponse } from 'aws-lambda';
-
-export interface StoryTextMessage {
-  body: string;
-  messageAttributes?: {
-    task_type?: string;
-    [key: string]: any;
-  };
-}
+import { SQSEvent, SQSRecord } from 'aws-lambda';
 
 export interface StoryTextRecord extends SQSRecord {
   body: string;
-  messageAttributes?: {
+  messageAttributes: {
     task_type?: {
       stringValue: string;
     };
@@ -20,14 +12,6 @@ export interface StoryTextRecord extends SQSRecord {
 
 export interface StoryTextEvent extends SQSEvent {
   Records: StoryTextRecord[];
-}
-
-export interface StoryTextResponse {
-  message: string;
-  processedPayload: string;
-  timestamp: string;
-  status: 'success' | 'error';
-  error?: string;
 }
 
 export interface DynamoDBItem {
