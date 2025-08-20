@@ -101,8 +101,7 @@ async function processText(text: string): Promise<string> {
           role: "user",
           content: text
         }
-      ],
-      temperature: 0.7
+      ]
     });
     
     const processedText = completion.choices[0]?.message?.content || text;
