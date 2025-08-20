@@ -1,10 +1,11 @@
 import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput, PutCommand, PutCommandInput, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import OpenAI from 'openai';
-import { StoryTextEvent, StoryMetaDataStatus } from './index.types';
+import { StoryTextEvent, StoryMetaDataStatus, StoryVideoTaskStatus, StoryVideoTaskDDBItem, StoryVideoTaskType, StorySegment } from './index.types';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomBytes } from 'crypto';
 
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
@@ -71,12 +72,50 @@ async function processMessage(record: any): Promise<void> {
     
     // Process the text with OpenAI GPT-5
     try{
-        const processedText = await processText(storyPrompt);
+        // Create text video task record
+        const textVideoTaskRecord = makeVideoTaskRecord(message.id, storyPrompt, StoryVideoTaskType.TEXT, StoryVideoTaskStatus.IN_PROGRESS);
+        await createVideoTaskRecord(textVideoTaskRecord);
+        
         await updateStoryMetadataRecord(message.id, StoryMetaDataStatus.IN_PROGRESS);
+        const processedText = await processText(storyPrompt);
+
+        // Verify that processedText is a valid JSON array and that each object in the array has a "text" and "imagePrompt" key
+        const validatedStorySegments = validateStoryTextResponse(processedText);
+        
         // Log the processing result
         console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
 
         console.log(`Message ${record.messageId} processed successfully`);
+
+        // Batch create video-task records for TTS and images based on validated segments
+        const videoTaskRecords: StoryVideoTaskDDBItem[] = [];
+        
+        // Create TTS tasks for each text segment
+        validatedStorySegments.forEach(segment => {
+          const ttsTaskRecord = makeVideoTaskRecord(message.id, segment.text, StoryVideoTaskType.TTS, StoryVideoTaskStatus.PENDING);
+          videoTaskRecords.push(ttsTaskRecord);
+        });
+        
+        // Create IMAGE tasks for each image prompt
+        validatedStorySegments.forEach(segment => {
+          const imageTaskRecord = makeVideoTaskRecord(message.id, segment.imagePrompt, StoryVideoTaskType.IMAGE, StoryVideoTaskStatus.PENDING);
+          videoTaskRecords.push(imageTaskRecord);
+        });
+        
+        await batchCreateVideoTaskRecords(videoTaskRecords);
+        
+        // Compile all task IDs into an array
+        const allTaskIds = [
+          textVideoTaskRecord.task_id,
+          ...videoTaskRecords.map(record => record.task_id)
+        ];
+        
+        // Set text video task record to complete
+        await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED);
+        
+        // Update metadata record with all media IDs
+        await updateStoryMetadataRecordWithMediaIds(message.id, allTaskIds);
+        //TODO: Send SNS message for all text video task records
     } catch (error) {
         console.error('Error processing text:', error);
         await updateStoryMetadataRecord(message.id, StoryMetaDataStatus.FAILED);
@@ -111,6 +150,56 @@ async function processText(text: string): Promise<string> {
     return processedText;
 }
 
+function validateStoryTextResponse(responseText: string): StorySegment[] {
+  try {
+    // Parse the JSON response
+    const parsed = JSON.parse(responseText);
+    
+    // Check if it's an array
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array');
+    }
+    
+    // Validate each segment
+    const validatedSegments: StorySegment[] = [];
+    
+    for (let i = 0; i < parsed.length; i++) {
+      const segment = parsed[i];
+      
+      // Check if segment is an object
+      if (typeof segment !== 'object' || segment === null) {
+        throw new Error(`Segment at index ${i} is not an object`);
+      }
+      
+      // Check if required properties exist and are strings
+      if (typeof segment.text !== 'string') {
+        throw new Error(`Segment at index ${i} missing or invalid 'text' property`);
+      }
+      
+      if (typeof segment.imagePrompt !== 'string') {
+        throw new Error(`Segment at index ${i} missing or invalid 'imagePrompt' property`);
+      }
+      
+      // Add validated segment
+      validatedSegments.push({
+        text: segment.text,
+        imagePrompt: segment.imagePrompt
+      });
+    }
+    
+    console.log(`Successfully validated ${validatedSegments.length} story segments`);
+    return validatedSegments;
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Story text response validation failed:', errorMessage);
+    console.error('Raw response:', responseText);
+    
+    // Re-throw the error to trigger the error handling block
+    throw new Error(`Story text validation failed: ${errorMessage}`);
+  }
+}
+
 async function updateStoryMetadataRecord(id: string, status: StoryMetaDataStatus): Promise<void> {
   const timestamp = new Date().toISOString();
   
@@ -138,3 +227,142 @@ async function updateStoryMetadataRecord(id: string, status: StoryMetaDataStatus
     throw error;
   }
 }
+
+async function updateStoryMetadataRecordWithMediaIds(id: string, mediaIds: string[]): Promise<void> {
+  const timestamp = new Date().toISOString();
+  
+  const dynamoParams: UpdateCommandInput = {
+    TableName: process.env['STORY_METADATA_DYNAMODB_TABLE'],
+    Key: {
+      id
+    },
+    UpdateExpression: 'SET #media_ids = :media_ids, #date_updated = :date_updated',
+    ExpressionAttributeNames: {
+      '#media_ids': 'media_ids',
+      '#date_updated': 'date_updated'
+    },
+    ExpressionAttributeValues: {
+      ':media_ids': mediaIds,
+      ':date_updated': timestamp
+    }
+  };
+  
+  try {
+    await dynamodb.send(new UpdateCommand(dynamoParams));
+    console.log(`Media IDs updated in DynamoDB successfully with ID: ${id}, Media IDs: ${mediaIds.join(', ')}`);
+  } catch (error) {
+    console.error('Error updating media IDs in DynamoDB:', error);
+    throw error;
+  }
+}
+
+function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryVideoTaskType, status: StoryVideoTaskStatus): StoryVideoTaskDDBItem {
+    return {
+        id: parentId, 
+        task_id: randomBytes(8).toString('hex'),
+        type,
+        status,
+        source_prompt: storyPrompt,
+        date_created: new Date().toISOString(),
+        date_updated: new Date().toISOString(),
+    }
+}
+
+async function createVideoTaskRecord(videoTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
+  const dynamoParams: PutCommandInput = {
+    TableName: process.env['STORY_VIDEO_TASKS_DYNAMODB_TABLE'],
+    Item: videoTaskRecord
+  };
+  
+  try {
+    await dynamodb.send(new PutCommand(dynamoParams));
+    console.log(`Video task record created successfully with task_id: ${videoTaskRecord.task_id}`);
+  } catch (error) {
+    console.error('Error creating video task record in DynamoDB:', error);
+    throw error;
+  }
+}
+
+async function batchCreateVideoTaskRecords(videoTaskRecords: StoryVideoTaskDDBItem[]): Promise<void> {
+  if (videoTaskRecords.length === 0) {
+    console.log('No video task records to create');
+    return;
+  }
+
+  // DynamoDB BatchWriteItem can handle up to 25 items per request
+  const BATCH_SIZE = 25;
+  const batches = [];
+  
+  // Split records into batches of 25
+  for (let i = 0; i < videoTaskRecords.length; i += BATCH_SIZE) {
+    batches.push(videoTaskRecords.slice(i, i + BATCH_SIZE));
+  }
+  
+  console.log(`Creating ${videoTaskRecords.length} video task records in ${batches.length} batch(es)`);
+  
+  try {
+    // Process each batch
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      
+      if (!batch) {
+        console.warn(`Batch ${batchIndex + 1} is undefined, skipping...`);
+        continue;
+      }
+      
+      const tableName = process.env['STORY_VIDEO_TASKS_DYNAMODB_TABLE'];
+      if (!tableName) {
+        throw new Error('STORY_VIDEO_TASKS_DYNAMODB_TABLE environment variable is not set');
+      }
+      
+      const batchParams = {
+        RequestItems: {
+          [tableName]: batch.map(record => ({
+            PutRequest: {
+              Item: record
+            }
+          }))
+        }
+      };
+      
+      await dynamodb.send(new BatchWriteCommand(batchParams));
+      console.log(`Batch ${batchIndex + 1}/${batches.length} completed successfully (${batch.length} records)`);
+    }
+    
+    console.log(`All ${videoTaskRecords.length} video task records created successfully`);
+  } catch (error) {
+    console.error('Error batch creating video task records in DynamoDB:', error);
+    throw error;
+  }
+}
+
+async function updateVideoTaskRecordStatus(id: string, taskId: string, status: StoryVideoTaskStatus): Promise<void> {
+  const timestamp = new Date().toISOString();
+  
+  const dynamoParams: UpdateCommandInput = {
+    TableName: process.env['STORY_VIDEO_TASKS_DYNAMODB_TABLE'],
+    Key: {
+      id: id,
+      task_id: taskId
+    },
+    UpdateExpression: 'SET #status = :status, #date_updated = :date_updated',
+    ExpressionAttributeNames: {
+      '#status': 'status',
+      '#date_updated': 'date_updated'
+    },
+    ExpressionAttributeValues: {
+      ':status': status,
+      ':date_updated': timestamp
+    }
+  };
+  
+  try {
+    await dynamodb.send(new UpdateCommand(dynamoParams));
+    console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}`);
+  } catch (error) {
+    console.error('Error updating video task record status in DynamoDB:', error);
+    throw error;
+  }
+}
+
+

@@ -28,5 +28,34 @@ export interface StoryMetaDataDDBItem {
   status: StoryMetaDataStatus;
   date_created: string;
   date_updated: string;
-  media_ids: string[];
+  task_ids: string[];
+}
+
+export enum StoryVideoTaskStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED'
+}
+
+export enum StoryVideoTaskType {
+  TTS = 'TTS',
+  IMAGE = 'IMAGE',
+  TEXT = 'TEXT'
+}
+
+export interface StoryVideoTaskDDBItem {
+  id: string;
+  task_id: string;
+  type: StoryVideoTaskType;
+  status: StoryVideoTaskStatus;
+  date_created: string;
+  date_updated: string;
+  source_prompt: string;
+  media_url?: string;
+}
+
+export interface StorySegment {
+  text: string;
+  imagePrompt: string;
 }
