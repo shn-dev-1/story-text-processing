@@ -40,3 +40,5 @@ variable "openai_api_key" {
   sensitive   = true
   default     = ""
 }
+
+

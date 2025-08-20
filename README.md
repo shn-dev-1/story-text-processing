@@ -101,14 +101,27 @@ The function integrates with OpenAI GPT-5 to process text content:
 ## Environment Variables
 
 - `NODE_ENV`: Environment (production)
-- `DYNAMODB_TABLE`: Name of the story-metadata DynamoDB table
+- `STORY_METADATA_DYNAMODB_TABLE`: Name of the story-metadata DynamoDB table
+- `STORY_VIDEO_TASKS_DYNAMODB_TABLE`: Name of the story-video-tasks DynamoDB table
 - `OPENAI_API_KEY`: OpenAI API key for GPT-5 integration
+- `S3_BUCKET_NAME`: Name of the S3 bucket for story video data (from shared infrastructure)
+
 
 ## DynamoDB Tables
 
 The Lambda function has CRUD access to the following DynamoDB tables:
 - **story-metadata**: Primary table for storing processed text data
 - **story-video-tasks**: Table for managing video generation tasks
+
+## S3 Bucket Access
+
+The Lambda function has read/write access to the story video data S3 bucket:
+- **Bucket**: Retrieved from shared infrastructure remote state
+- **Permissions**: GetObject, PutObject, DeleteObject, ListBucket, GetBucketLocation
+- **Usage**: 
+  - Stores processed story responses in JSON format
+  - Creates folder structure: `<storyId>/<storyId>_story_response.json`
+  - Includes metadata: story-id, upload-date, content-type
 
 ## Monitoring
 

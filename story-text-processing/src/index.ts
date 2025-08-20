@@ -1,6 +1,7 @@
 import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput, PutCommand, PutCommandInput, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput, PutCommand, PutCommandInput, BatchWriteCommand, QueryCommand, QueryCommandOutput } from "@aws-sdk/lib-dynamodb";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import OpenAI from 'openai';
 import { StoryTextEvent, StoryMetaDataStatus, StoryVideoTaskStatus, StoryVideoTaskDDBItem, StoryVideoTaskType, StorySegment } from './index.types';
 import * as fs from 'fs';
@@ -10,6 +11,7 @@ import { randomBytes } from 'crypto';
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
+const s3Client = new S3Client({});
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -72,7 +74,15 @@ async function processMessage(record: any): Promise<void> {
     
     // Process the text with OpenAI GPT-5
     try{
-        // Create text video task record
+        // Check if TEXT video task record already exists to prevent duplicates
+        const existingTextTask = await getExistingTextVideoTask(message.id);
+        
+        if (existingTextTask) {
+            console.log(`TEXT record already exists for story ${message.id}, exiting to prevent duplicate processing`);
+            return; // Exit the function early
+        }
+        
+        console.log(`Creating new TEXT record for story ${message.id}`);
         const textVideoTaskRecord = makeVideoTaskRecord(message.id, storyPrompt, StoryVideoTaskType.TEXT, StoryVideoTaskStatus.IN_PROGRESS);
         await createVideoTaskRecord(textVideoTaskRecord);
         
@@ -81,6 +91,9 @@ async function processMessage(record: any): Promise<void> {
 
         // Verify that processedText is a valid JSON array and that each object in the array has a "text" and "imagePrompt" key
         const validatedStorySegments = validateStoryTextResponse(processedText);
+        
+        // Upload the processed text response to S3
+        await uploadStoryResponseToS3(message.id, processedText);
         
         // Log the processing result
         console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
@@ -362,6 +375,69 @@ async function updateVideoTaskRecordStatus(id: string, taskId: string, status: S
   } catch (error) {
     console.error('Error updating video task record status in DynamoDB:', error);
     throw error;
+  }
+}
+
+async function getExistingTextVideoTask(storyId: string): Promise<StoryVideoTaskDDBItem | null> {
+  try {
+    // Query for existing TEXT type video task for this story
+    const queryParams = {
+      TableName: process.env['STORY_VIDEO_TASKS_DYNAMODB_TABLE'],
+      KeyConditionExpression: 'id = :storyId',
+      FilterExpression: '#type = :taskType',
+      ExpressionAttributeNames: {
+        '#type': 'type'
+      },
+      ExpressionAttributeValues: {
+        ':storyId': storyId,
+        ':taskType': StoryVideoTaskType.TEXT
+      }
+    };
+    
+    const result: QueryCommandOutput = await dynamodb.send(new QueryCommand(queryParams));
+    
+    if (result.Items && result.Items.length > 0) {
+      // Return the first TEXT task found
+      return result.Items[0] as StoryVideoTaskDDBItem;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error querying for existing TEXT video task:', error);
+    // If query fails, assume no existing record to be safe
+    return null;
+  }
+}
+
+async function uploadStoryResponseToS3(storyId: string, processedText: string): Promise<void> {
+  try {
+    const bucketName = process.env['S3_BUCKET_NAME'];
+    if (!bucketName) {
+      throw new Error('S3_BUCKET_NAME environment variable is not set');
+    }
+    
+    // Create folder structure: <storyId>/<storyId>_story_response.json
+    const key = `${storyId}/${storyId}_story_response.json`;
+    
+    const uploadParams = {
+      Bucket: bucketName,
+      Key: key,
+      Body: processedText,
+      ContentType: 'application/json',
+      Metadata: {
+        'story-id': storyId,
+        'upload-date': new Date().toISOString(),
+        'content-type': 'story-response'
+      }
+    };
+    
+    await s3Client.send(new PutObjectCommand(uploadParams));
+    console.log(`Story response uploaded to S3 successfully. Bucket: ${bucketName}, Key: ${key}`);
+    
+  } catch (error) {
+    console.error('Error uploading story response to S3:', error);
+    // Don't throw error to avoid failing the entire process
+    // Just log it and continue
   }
 }
 

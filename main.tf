@@ -44,6 +44,11 @@ data "aws_dynamodb_table" "story_video_tasks" {
   name = "story-video-tasks"
 }
 
+# Get S3 bucket reference from remote state
+data "aws_s3_bucket" "story_video_data" {
+  bucket = data.terraform_remote_state.shared_infrastructure.outputs.s3_bucket_name
+}
+
 # Create a ZIP file of the story-text-processing Lambda function code
 data "archive_file" "story_text_processing_lambda_zip" {
   type        = "zip"
@@ -68,6 +73,7 @@ resource "aws_lambda_function" "story_text_processing_lambda" {
       STORY_METADATA_DYNAMODB_TABLE    = data.aws_dynamodb_table.story_metadata.name
       STORY_VIDEO_TASKS_DYNAMODB_TABLE = data.aws_dynamodb_table.story_video_tasks.name
       OPENAI_API_KEY                   = var.openai_api_key
+      S3_BUCKET_NAME                   = data.terraform_remote_state.shared_infrastructure.outputs.s3_bucket_name
     }
   }
 }
@@ -145,6 +151,32 @@ resource "aws_iam_role_policy" "story_text_processing_lambda_sqs" {
           "sqs:ChangeMessageVisibility"
         ]
         Resource = data.terraform_remote_state.shared_infrastructure.outputs.task_queue_arns["TEXT"]
+      }
+    ]
+  })
+}
+
+# Create custom policy for S3 permissions
+resource "aws_iam_role_policy" "story_text_processing_lambda_s3" {
+  name = "story-text-processing-lambda-s3-policy"
+  role = aws_iam_role.story_text_processing_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          data.aws_s3_bucket.story_video_data.arn,
+          "${data.aws_s3_bucket.story_video_data.arn}/*"
+        ]
       }
     ]
   })
