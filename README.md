@@ -34,6 +34,7 @@ This repository contains an AWS Lambda function that processes text messages fro
 ### IAM Role
 - Basic Lambda execution permissions
 - DynamoDB CRUD permissions on story-metadata table
+- DynamoDB CRUD permissions on story-video-tasks table
 - SQS permissions for message processing
 
 ### SQS Integration
@@ -93,6 +94,12 @@ The Lambda function processes SQS messages with the following structure:
 
 - `NODE_ENV`: Environment (production)
 - `DYNAMODB_TABLE`: Name of the story-metadata DynamoDB table
+
+## DynamoDB Tables
+
+The Lambda function has CRUD access to the following DynamoDB tables:
+- **story-metadata**: Primary table for storing processed text data
+- **story-video-tasks**: Table for managing video generation tasks
 
 ## Monitoring
 

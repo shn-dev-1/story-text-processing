@@ -140,7 +140,7 @@ jobs:
             - Lambda Function: \`story-text-processing-lambda\`
             - IAM Role: \`story-text-processing-lambda-role\`
             - SQS Event Source Mapping
-            - DynamoDB CRUD Permissions
+            - DynamoDB CRUD Permissions (story-metadata, story-video-tasks)
             
             *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
             
@@ -169,7 +169,7 @@ jobs:
         echo "- Lambda Function: \`story-text-processing-lambda\`" >> $GITHUB_STEP_SUMMARY
         echo "- IAM Role: \`story-text-processing-lambda-role\`" >> $GITHUB_STEP_SUMMARY
         echo "- SQS Event Source Mapping" >> $GITHUB_STEP_SUMMARY
-        echo "- DynamoDB CRUD Permissions" >> $GITHUB_STEP_SUMMARY
+        echo "- DynamoDB CRUD Permissions (story-metadata, story-video-tasks)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Deployed by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
         echo "**Action**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY

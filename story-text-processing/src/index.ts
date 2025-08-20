@@ -1,7 +1,7 @@
 import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, PutCommandInput } from "@aws-sdk/lib-dynamodb";
-import { StoryTextEvent } from './index.types';
+import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
+import { StoryTextEvent, StoryMetaDataStatus } from './index.types';
 
 // Initialize AWS SDK clients
 const dynamoClient = new DynamoDBClient({});
@@ -52,12 +52,16 @@ async function processMessage(record: any): Promise<void> {
         record.messageAttributes.task_type.stringValue !== 'TEXT') {
       throw new Error(`Invalid task type: ${record.messageAttributes.task_type.stringValue}`);
     }
+
+    const message = JSON.parse(payload.message);
+    const storyPrompt = message.story_prompt;
+    console.log("Story Prompt: ", storyPrompt);
     
     // Process the text (placeholder for actual text processing logic)
-    const processedResult = await processText(payload);
+    await processText(payload);
     
     // Store the processed result in DynamoDB
-    await storeInDynamoDB(payload, processedResult, record.messageId);
+    await setMetadataRecordToInProgress(message.id);
     
     console.log(`Message ${record.messageId} processed successfully`);
     
@@ -85,28 +89,30 @@ async function processText(text: string): Promise<string> {
   return text.toUpperCase();
 }
 
-async function storeInDynamoDB(originalPayload: string, processedResult: string, messageId: string): Promise<void> {
+async function setMetadataRecordToInProgress(id: string): Promise<void> {
   const timestamp = new Date().toISOString();
-  const itemId = `story-${Date.now()}-${messageId}`;
   
-  const dynamoParams: PutCommandInput = {
-    TableName: process.env['DYNAMODB_TABLE'],
-    Item: {
-      id: itemId,
-      payload: originalPayload,
-      timestamp: timestamp,
-      status: 'processed',
-      processedAt: timestamp,
-      processingResult: processedResult,
-      messageId: messageId
+  const dynamoParams: UpdateCommandInput = {
+    TableName: process.env['STORY_METADATA_DYNAMODB_TABLE'],
+    Key: {
+      id
+    },
+    UpdateExpression: 'SET #status = :status, #date_updated = :date_updated',
+    ExpressionAttributeNames: {
+      '#status': 'status',
+      '#date_updated': 'date_updated'
+    },
+    ExpressionAttributeValues: {
+      ':date_updated': timestamp,
+      ':status': StoryMetaDataStatus.IN_PROGRESS,
     }
   };
   
   try {
-    await dynamodb.send(new PutCommand(dynamoParams));
-    console.log(`Data stored in DynamoDB successfully with ID: ${itemId}`);
+    await dynamodb.send(new UpdateCommand(dynamoParams));
+    console.log(`Data updated in DynamoDB successfully with ID: ${id}`);
   } catch (error) {
-    console.error('Error storing data in DynamoDB:', error);
+    console.error('Error updating data in DynamoDB:', error);
     throw error;
   }
 }

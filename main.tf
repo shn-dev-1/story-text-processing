@@ -40,6 +40,10 @@ data "aws_dynamodb_table" "story_metadata" {
   name = "story-metadata"
 }
 
+data "aws_dynamodb_table" "story_video_tasks" {
+  name = "story-video-tasks"
+}
+
 # Create a ZIP file of the story-text-processing Lambda function code
 data "archive_file" "story_text_processing_lambda_zip" {
   type        = "zip"
@@ -113,7 +117,9 @@ resource "aws_iam_role_policy" "story_text_processing_lambda_dynamodb" {
         ]
         Resource = [
           data.aws_dynamodb_table.story_metadata.arn,
-          "${data.aws_dynamodb_table.story_metadata.arn}/index/*"
+          "${data.aws_dynamodb_table.story_metadata.arn}/index/*",
+          data.aws_dynamodb_table.story_video_tasks.arn,
+          "${data.aws_dynamodb_table.story_video_tasks.arn}/index/*"
         ]
       }
     ]

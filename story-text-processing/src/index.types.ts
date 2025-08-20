@@ -14,11 +14,18 @@ export interface StoryTextEvent extends SQSEvent {
   Records: StoryTextRecord[];
 }
 
-export interface DynamoDBItem {
+export enum StoryMetaDataStatus {
+  PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
+  POST_PROCESSING = 'POST_PROCESSING',
+  COMPLETED = 'COMPLETED'
+}
+
+export interface StoryMetaDataDDBItem {
   id: string;
-  payload: string;
-  timestamp: string;
-  status: string;
-  processedAt?: string;
-  processingResult?: string;
+  created_by: string;
+  status: StoryMetaDataStatus;
+  date_created: string;
+  date_updated: string;
+  media_ids: string[];
 }
