@@ -41,11 +41,13 @@ export const handler = async (event: StoryTextEvent): Promise<SQSBatchResponse> 
 
 async function processMessage(record: any): Promise<void> {
   try {
-    // Parse the message body
+    // Parse the message body (SNS notification)
     const messageBody = JSON.parse(record.body);
-    const payload = messageBody.body || messageBody.payload || record.body;
     
-    console.log(`Processing payload: ${payload}`);
+    // Extract the actual message content from the SNS notification
+    const message = JSON.parse(messageBody.Message);
+    
+    console.log(`Processing message:`, message);
     
     // Validate task type if present
     if (record.messageAttributes?.task_type?.stringValue && 
@@ -53,12 +55,11 @@ async function processMessage(record: any): Promise<void> {
       throw new Error(`Invalid task type: ${record.messageAttributes.task_type.stringValue}`);
     }
 
-    const message = JSON.parse(payload.message);
     const storyPrompt = message.story_prompt;
     console.log("Story Prompt: ", storyPrompt);
     
     // Process the text (placeholder for actual text processing logic)
-    await processText(payload);
+    await processText(storyPrompt);
     
     // Store the processed result in DynamoDB
     await setMetadataRecordToInProgress(message.id);
