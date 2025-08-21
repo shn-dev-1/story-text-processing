@@ -294,7 +294,7 @@ function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryV
         source_prompt: storyPrompt,
         date_created: new Date().toISOString(),
         date_updated: new Date().toISOString(),
-        pending_task_id: `${parentId}-${task_id}`
+        pending_task_id: parentId
     }
 }
 
@@ -394,9 +394,9 @@ async function updateVideoTaskRecordStatus(
     }
     
     // Remove pending_task_id field when task is completed
-    updateExpression += ', #pending_task_id = :pending_task_id';
+    updateExpression += ' REMOVE #pending_task_id';
     expressionAttributeNames['#pending_task_id'] = 'pending_task_id';
-    expressionAttributeValues[':pending_task_id'] = undefined;
+    // No need to add to expressionAttributeValues for REMOVE operations
   }
   
   const dynamoParams: UpdateCommandInput = {
