@@ -114,6 +114,7 @@ The Lambda function has CRUD access to the following DynamoDB tables:
   - `task_ids`: Map of task types (TEXT, TTS, IMAGE) to arrays of task IDs
   - Status updated to COMPLETED when all tasks are processed
 - **story-video-tasks**: Table for managing video generation tasks
+  - `media_url`: S3 URI of completed task output (set when status transitions to COMPLETED)
 
 ## S3 Bucket Access
 

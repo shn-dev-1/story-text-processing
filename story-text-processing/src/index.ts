@@ -93,11 +93,10 @@ async function processMessage(record: any): Promise<void> {
         const validatedStorySegments = validateStoryTextResponse(processedText);
         
         // Upload the processed text response to S3
-        await uploadStoryResponseToS3(message.id, textVideoTaskRecord.task_id, processedText);
+        const textResponseS3Uri = await uploadStoryResponseToS3(message.id, textVideoTaskRecord.task_id, processedText);
         
         // Log the processing result
         console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
-
         console.log(`Message ${record.messageId} processed successfully`);
 
         // Batch create video-task records for TTS and images based on validated segments
@@ -128,8 +127,8 @@ async function processMessage(record: any): Promise<void> {
             .map(record => record.task_id)
         };
         
-        // Set text video task record to complete
-        await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED);
+        // Set text video task record to complete with S3 URI
+        await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED, textResponseS3Uri);
         
         // Log the task IDs organized by type for visibility
         console.log(`Task IDs organized by type:`, JSON.stringify(taskIdsByType, null, 2));
@@ -365,8 +364,31 @@ async function batchCreateVideoTaskRecords(videoTaskRecords: StoryVideoTaskDDBIt
   }
 }
 
-async function updateVideoTaskRecordStatus(id: string, taskId: string, status: StoryVideoTaskStatus): Promise<void> {
+async function updateVideoTaskRecordStatus(
+  id: string, 
+  taskId: string, 
+  status: StoryVideoTaskStatus, 
+  mediaUrl?: string
+): Promise<void> {
   const timestamp = new Date().toISOString();
+  
+  // Build update expression and values based on whether we're setting media_url
+  let updateExpression = 'SET #status = :status, #date_updated = :date_updated';
+  let expressionAttributeNames: { [key: string]: string } = {
+    '#status': 'status',
+    '#date_updated': 'date_updated'
+  };
+  let expressionAttributeValues: { [key: string]: any } = {
+    ':status': status,
+    ':date_updated': timestamp
+  };
+  
+  // If status is COMPLETED and mediaUrl is provided, also set media_url
+  if (status === StoryVideoTaskStatus.COMPLETED && mediaUrl) {
+    updateExpression += ', #media_url = :media_url';
+    expressionAttributeNames['#media_url'] = 'media_url';
+    expressionAttributeValues[':media_url'] = mediaUrl;
+  }
   
   const dynamoParams: UpdateCommandInput = {
     TableName: process.env['STORY_VIDEO_TASKS_DYNAMODB_TABLE'],
@@ -374,20 +396,18 @@ async function updateVideoTaskRecordStatus(id: string, taskId: string, status: S
       id: id,
       task_id: taskId
     },
-    UpdateExpression: 'SET #status = :status, #date_updated = :date_updated',
-    ExpressionAttributeNames: {
-      '#status': 'status',
-      '#date_updated': 'date_updated'
-    },
-    ExpressionAttributeValues: {
-      ':status': status,
-      ':date_updated': timestamp
-    }
+    UpdateExpression: updateExpression,
+    ExpressionAttributeNames: expressionAttributeNames,
+    ExpressionAttributeValues: expressionAttributeValues
   };
   
   try {
     await dynamodb.send(new UpdateCommand(dynamoParams));
-    console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}`);
+    if (status === StoryVideoTaskStatus.COMPLETED && mediaUrl) {
+      console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Media URL: ${mediaUrl}`);
+    } else {
+      console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}`);
+    }
   } catch (error) {
     console.error('Error updating video task record status in DynamoDB:', error);
     throw error;
@@ -425,36 +445,33 @@ async function getExistingTextVideoTask(storyId: string): Promise<StoryVideoTask
   }
 }
 
-async function uploadStoryResponseToS3(storyId: string, taskId: string, processedText: string): Promise<void> {
-  try {
-    const bucketName = process.env['S3_BUCKET_NAME'];
-    if (!bucketName) {
-      throw new Error('S3_BUCKET_NAME environment variable is not set');
-    }
-    
-    // Create folder structure: <storyId>/<taskId>_story_response.json
-    const key = `${storyId}/${taskId}_${StoryVideoTaskType.TEXT}.json`;
-    
-    const uploadParams = {
-      Bucket: bucketName,
-      Key: key,
-      Body: processedText,
-      ContentType: 'application/json',
-      Metadata: {
-        'story-id': storyId,
-        'upload-date': new Date().toISOString(),
-        'content-type': 'story-response'
-      }
-    };
-    
-    await s3Client.send(new PutObjectCommand(uploadParams));
-    console.log(`Story response uploaded to S3 successfully. Bucket: ${bucketName}, Key: ${key}`);
-    
-  } catch (error) {
-    console.error('Error uploading story response to S3:', error);
-    // Don't throw error to avoid failing the entire process
-    // Just log it and continue
+async function uploadStoryResponseToS3(storyId: string, taskId: string, processedText: string): Promise<string> {
+  const bucketName = process.env['S3_BUCKET_NAME'];
+  if (!bucketName) {
+    throw new Error('S3_BUCKET_NAME environment variable is not set');
   }
+  
+  // Create folder structure: <storyId>/<taskId>_story_response.json
+  const key = `${storyId}/${taskId}_${StoryVideoTaskType.TEXT}.json`;
+  
+  const uploadParams = {
+    Bucket: bucketName,
+    Key: key,
+    Body: processedText,
+    ContentType: 'application/json',
+    Metadata: {
+      'story-id': storyId,
+      'upload-date': new Date().toISOString(),
+      'content-type': 'story-response'
+    }
+  };
+  
+  await s3Client.send(new PutObjectCommand(uploadParams));
+  console.log(`Story response uploaded to S3 successfully. Bucket: ${bucketName}, Key: ${key}`);
+  
+  // Return the S3 URI of the created object
+  const s3Uri = `s3://${bucketName}/${key}`;
+  return s3Uri;
 }
 
 
