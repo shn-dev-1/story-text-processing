@@ -117,15 +117,7 @@ async function processMessage(record: any): Promise<void> {
         await batchCreateVideoTaskRecords(videoTaskRecords);
         
         // Create a map of task types to arrays of task IDs
-        const taskIdsByType: { [key in StoryVideoTaskType]?: string[] } = {
-          [StoryVideoTaskType.TEXT]: [textVideoTaskRecord.task_id],
-          [StoryVideoTaskType.TTS]: videoTaskRecords
-            .filter(record => record.type === StoryVideoTaskType.TTS)
-            .map(record => record.task_id),
-          [StoryVideoTaskType.IMAGE]: videoTaskRecords
-            .filter(record => record.type === StoryVideoTaskType.IMAGE)
-            .map(record => record.task_id)
-        };
+        const taskIdsByType = createTaskIdsMap(textVideoTaskRecord, videoTaskRecords);
         
         // Set text video task record to complete with S3 URI
         await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED, textResponseS3Uri);
@@ -134,7 +126,7 @@ async function processMessage(record: any): Promise<void> {
         console.log(`Task IDs organized by type:`, JSON.stringify(taskIdsByType, null, 2));
         
         // Update metadata record with task IDs organized by type and set status to COMPLETED
-        await updateStoryMetadataRecordAsComplete(message.id, taskIdsByType);
+        await updateStoryMetadataRecordWithTaskIds(message.id, taskIdsByType);
         //TODO: Send SNS message for all text video task records
     } catch (error) {
         console.error('Error processing text:', error);
@@ -248,7 +240,7 @@ async function updateStoryMetadataRecord(id: string, status: StoryMetaDataStatus
   }
 }
 
-async function updateStoryMetadataRecordAsComplete(
+async function updateStoryMetadataRecordWithTaskIds(
   id: string, 
   taskIdsByType: { [key in StoryVideoTaskType]?: string[] }
 ): Promise<void> {
@@ -259,25 +251,23 @@ async function updateStoryMetadataRecordAsComplete(
     Key: {
       id
     },
-    UpdateExpression: 'SET #task_ids = :task_ids, #status = :status, #date_updated = :date_updated',
+    UpdateExpression: 'SET #task_ids = :task_ids, #date_updated = :date_updated',
     ExpressionAttributeNames: {
       '#task_ids': 'task_ids',
-      '#status': 'status',
       '#date_updated': 'date_updated'
     },
     ExpressionAttributeValues: {
       ':task_ids': taskIdsByType,
-      ':status': StoryMetaDataStatus.COMPLETED,
       ':date_updated': timestamp
     }
   };
   
   try {
     await dynamodb.send(new UpdateCommand(dynamoParams));
-    console.log(`Task IDs map and status updated in DynamoDB successfully with ID: ${id}`);
+    console.log(`Task IDs map updated in DynamoDB successfully with ID: ${id}`);
     console.log(`Task IDs by type:`, JSON.stringify(taskIdsByType, null, 2));
   } catch (error) {
-    console.error('Error updating task IDs map and status in DynamoDB:', error);
+    console.error('Error updating task IDs map in DynamoDB:', error);
     throw error;
   }
 }
@@ -296,6 +286,21 @@ function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryV
         date_updated: new Date().toISOString(),
         sparse_gsi_hash_key: parentId
     }
+}
+
+function createTaskIdsMap(
+  textVideoTaskRecord: StoryVideoTaskDDBItem, 
+  videoTaskRecords: StoryVideoTaskDDBItem[]
+): { [key in StoryVideoTaskType]?: string[] } {
+  return {
+    [StoryVideoTaskType.TEXT]: [textVideoTaskRecord.task_id],
+    [StoryVideoTaskType.TTS]: videoTaskRecords
+      .filter(record => record.type === StoryVideoTaskType.TTS)
+      .map(record => record.task_id),
+    [StoryVideoTaskType.IMAGE]: videoTaskRecords
+      .filter(record => record.type === StoryVideoTaskType.IMAGE)
+      .map(record => record.task_id)
+  };
 }
 
 async function createVideoTaskRecord(videoTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
