@@ -55,6 +55,7 @@ export interface StoryVideoTaskDDBItem {
   date_updated: string;
   source_prompt: string;
   media_url?: string;
+  pending_task_id?: string;
 }
 
 export interface StorySegment {

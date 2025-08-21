@@ -285,14 +285,16 @@ async function updateStoryMetadataRecordAsComplete(
 
 
 function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryVideoTaskType, status: StoryVideoTaskStatus): StoryVideoTaskDDBItem {
+    const task_id = randomBytes(8).toString('hex');
     return {
         id: parentId, 
-        task_id: randomBytes(8).toString('hex'),
+        task_id,
         type,
         status,
         source_prompt: storyPrompt,
         date_created: new Date().toISOString(),
         date_updated: new Date().toISOString(),
+        pending_task_id: `${parentId}-${task_id}`
     }
 }
 
@@ -383,11 +385,18 @@ async function updateVideoTaskRecordStatus(
     ':date_updated': timestamp
   };
   
-  // If status is COMPLETED and mediaUrl is provided, also set media_url
-  if (status === StoryVideoTaskStatus.COMPLETED && mediaUrl) {
-    updateExpression += ', #media_url = :media_url';
-    expressionAttributeNames['#media_url'] = 'media_url';
-    expressionAttributeValues[':media_url'] = mediaUrl;
+  // If status is COMPLETED, also set media_url and remove pending_task_id
+  if (status === StoryVideoTaskStatus.COMPLETED) {
+    if (mediaUrl) {
+      updateExpression += ', #media_url = :media_url';
+      expressionAttributeNames['#media_url'] = 'media_url';
+      expressionAttributeValues[':media_url'] = mediaUrl;
+    }
+    
+    // Remove pending_task_id field when task is completed
+    updateExpression += ', #pending_task_id = :pending_task_id';
+    expressionAttributeNames['#pending_task_id'] = 'pending_task_id';
+    expressionAttributeValues[':pending_task_id'] = undefined;
   }
   
   const dynamoParams: UpdateCommandInput = {
@@ -403,8 +412,12 @@ async function updateVideoTaskRecordStatus(
   
   try {
     await dynamodb.send(new UpdateCommand(dynamoParams));
-    if (status === StoryVideoTaskStatus.COMPLETED && mediaUrl) {
-      console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Media URL: ${mediaUrl}`);
+    if (status === StoryVideoTaskStatus.COMPLETED) {
+      if (mediaUrl) {
+        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Media URL: ${mediaUrl}, Pending Task ID removed`);
+      } else {
+        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Pending Task ID removed`);
+      }
     } else {
       console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}`);
     }
