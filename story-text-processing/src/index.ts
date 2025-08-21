@@ -294,7 +294,7 @@ function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryV
         source_prompt: storyPrompt,
         date_created: new Date().toISOString(),
         date_updated: new Date().toISOString(),
-        pending_task_id: parentId
+        sparse_gsi_hash_key: parentId
     }
 }
 
@@ -385,7 +385,7 @@ async function updateVideoTaskRecordStatus(
     ':date_updated': timestamp
   };
   
-  // If status is COMPLETED, also set media_url and remove pending_task_id
+  // If status is COMPLETED, also set media_url and remove sparse_gsi_hash_key
   if (status === StoryVideoTaskStatus.COMPLETED) {
     if (mediaUrl) {
       updateExpression += ', #media_url = :media_url';
@@ -393,9 +393,9 @@ async function updateVideoTaskRecordStatus(
       expressionAttributeValues[':media_url'] = mediaUrl;
     }
     
-    // Remove pending_task_id field when task is completed
-    updateExpression += ' REMOVE #pending_task_id';
-    expressionAttributeNames['#pending_task_id'] = 'pending_task_id';
+    // Remove sparse_gsi_hash_key field when task is completed
+    updateExpression += ' REMOVE #sparse_gsi_hash_key';
+    expressionAttributeNames['#sparse_gsi_hash_key'] = 'sparse_gsi_hash_key';
     // No need to add to expressionAttributeValues for REMOVE operations
   }
   
@@ -414,9 +414,9 @@ async function updateVideoTaskRecordStatus(
     await dynamodb.send(new UpdateCommand(dynamoParams));
     if (status === StoryVideoTaskStatus.COMPLETED) {
       if (mediaUrl) {
-        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Media URL: ${mediaUrl}, Pending Task ID removed`);
+        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Media URL: ${mediaUrl}, Sparse GSI Hash Key removed`);
       } else {
-        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Pending Task ID removed`);
+        console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}, Sparse GSI Hash Key removed`);
       }
     } else {
       console.log(`Video task record status updated successfully. ID: ${id}, Task ID: ${taskId}, New Status: ${status}`);

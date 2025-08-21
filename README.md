@@ -115,7 +115,7 @@ The Lambda function has CRUD access to the following DynamoDB tables:
   - Status updated to COMPLETED when all tasks are processed
 - **story-video-tasks**: Table for managing video generation tasks
   - `media_url`: S3 URI of completed task output (set when status transitions to COMPLETED)
-  - `pending_task_id`: Temporary identifier for pending tasks (removed when status transitions to COMPLETED)
+  - `sparse_gsi_hash_key`: Sparse GSI hash key for pending tasks (removed when status transitions to COMPLETED)
 
 ## S3 Bucket Access
 
