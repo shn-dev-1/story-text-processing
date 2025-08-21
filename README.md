@@ -111,6 +111,8 @@ The function integrates with OpenAI GPT-5 to process text content:
 
 The Lambda function has CRUD access to the following DynamoDB tables:
 - **story-metadata**: Primary table for storing processed text data
+  - `task_ids`: Map of task types (TEXT, TTS, IMAGE) to arrays of task IDs
+  - Status updated to COMPLETED when all tasks are processed
 - **story-video-tasks**: Table for managing video generation tasks
 
 ## S3 Bucket Access

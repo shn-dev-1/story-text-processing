@@ -28,7 +28,9 @@ export interface StoryMetaDataDDBItem {
   status: StoryMetaDataStatus;
   date_created: string;
   date_updated: string;
-  task_ids: string[];
+  task_ids: {
+    [key in StoryVideoTaskType]?: string[];
+  };
 }
 
 export enum StoryVideoTaskStatus {

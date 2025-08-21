@@ -93,7 +93,7 @@ async function processMessage(record: any): Promise<void> {
         const validatedStorySegments = validateStoryTextResponse(processedText);
         
         // Upload the processed text response to S3
-        await uploadStoryResponseToS3(message.id, processedText);
+        await uploadStoryResponseToS3(message.id, textVideoTaskRecord.task_id, processedText);
         
         // Log the processing result
         console.log(`Text processing complete. Original: "${storyPrompt}" -> Processed: "${processedText}"`);
@@ -117,17 +117,25 @@ async function processMessage(record: any): Promise<void> {
         
         await batchCreateVideoTaskRecords(videoTaskRecords);
         
-        // Compile all task IDs into an array
-        const allTaskIds = [
-          textVideoTaskRecord.task_id,
-          ...videoTaskRecords.map(record => record.task_id)
-        ];
+        // Create a map of task types to arrays of task IDs
+        const taskIdsByType: { [key in StoryVideoTaskType]?: string[] } = {
+          [StoryVideoTaskType.TEXT]: [textVideoTaskRecord.task_id],
+          [StoryVideoTaskType.TTS]: videoTaskRecords
+            .filter(record => record.type === StoryVideoTaskType.TTS)
+            .map(record => record.task_id),
+          [StoryVideoTaskType.IMAGE]: videoTaskRecords
+            .filter(record => record.type === StoryVideoTaskType.IMAGE)
+            .map(record => record.task_id)
+        };
         
         // Set text video task record to complete
         await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED);
         
-        // Update metadata record with all media IDs
-        await updateStoryMetadataRecordWithMediaIds(message.id, allTaskIds);
+        // Log the task IDs organized by type for visibility
+        console.log(`Task IDs organized by type:`, JSON.stringify(taskIdsByType, null, 2));
+        
+        // Update metadata record with task IDs organized by type and set status to COMPLETED
+        await updateStoryMetadataRecordAsComplete(message.id, taskIdsByType);
         //TODO: Send SNS message for all text video task records
     } catch (error) {
         console.error('Error processing text:', error);
@@ -241,7 +249,10 @@ async function updateStoryMetadataRecord(id: string, status: StoryMetaDataStatus
   }
 }
 
-async function updateStoryMetadataRecordWithMediaIds(id: string, mediaIds: string[]): Promise<void> {
+async function updateStoryMetadataRecordAsComplete(
+  id: string, 
+  taskIdsByType: { [key in StoryVideoTaskType]?: string[] }
+): Promise<void> {
   const timestamp = new Date().toISOString();
   
   const dynamoParams: UpdateCommandInput = {
@@ -249,25 +260,30 @@ async function updateStoryMetadataRecordWithMediaIds(id: string, mediaIds: strin
     Key: {
       id
     },
-    UpdateExpression: 'SET #media_ids = :media_ids, #date_updated = :date_updated',
+    UpdateExpression: 'SET #task_ids = :task_ids, #status = :status, #date_updated = :date_updated',
     ExpressionAttributeNames: {
-      '#media_ids': 'media_ids',
+      '#task_ids': 'task_ids',
+      '#status': 'status',
       '#date_updated': 'date_updated'
     },
     ExpressionAttributeValues: {
-      ':media_ids': mediaIds,
+      ':task_ids': taskIdsByType,
+      ':status': StoryMetaDataStatus.COMPLETED,
       ':date_updated': timestamp
     }
   };
   
   try {
     await dynamodb.send(new UpdateCommand(dynamoParams));
-    console.log(`Media IDs updated in DynamoDB successfully with ID: ${id}, Media IDs: ${mediaIds.join(', ')}`);
+    console.log(`Task IDs map and status updated in DynamoDB successfully with ID: ${id}`);
+    console.log(`Task IDs by type:`, JSON.stringify(taskIdsByType, null, 2));
   } catch (error) {
-    console.error('Error updating media IDs in DynamoDB:', error);
+    console.error('Error updating task IDs map and status in DynamoDB:', error);
     throw error;
   }
 }
+
+
 
 function makeVideoTaskRecord(parentId: string, storyPrompt: string, type: StoryVideoTaskType, status: StoryVideoTaskStatus): StoryVideoTaskDDBItem {
     return {
@@ -409,15 +425,15 @@ async function getExistingTextVideoTask(storyId: string): Promise<StoryVideoTask
   }
 }
 
-async function uploadStoryResponseToS3(storyId: string, processedText: string): Promise<void> {
+async function uploadStoryResponseToS3(storyId: string, taskId: string, processedText: string): Promise<void> {
   try {
     const bucketName = process.env['S3_BUCKET_NAME'];
     if (!bucketName) {
       throw new Error('S3_BUCKET_NAME environment variable is not set');
     }
     
-    // Create folder structure: <storyId>/<storyId>_story_response.json
-    const key = `${storyId}/${storyId}_story_response.json`;
+    // Create folder structure: <storyId>/<taskId>_story_response.json
+    const key = `${storyId}/${taskId}_${StoryVideoTaskType.TEXT}.json`;
     
     const uploadParams = {
       Bucket: bucketName,
