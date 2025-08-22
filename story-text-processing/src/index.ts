@@ -308,6 +308,9 @@ function createTaskIdsMap(
     [StoryVideoTaskType.TTS]: videoTaskRecords
       .filter(record => record.type === StoryVideoTaskType.TTS)
       .map(record => record.task_id),
+    [StoryVideoTaskType.SUBTITLE]: videoTaskRecords
+      .filter(record => record.type === StoryVideoTaskType.SUBTITLE)
+      .map(record => record.task_id),
     [StoryVideoTaskType.IMAGE]: videoTaskRecords
       .filter(record => record.type === StoryVideoTaskType.IMAGE)
       .map(record => record.task_id)
