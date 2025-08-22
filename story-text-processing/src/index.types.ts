@@ -43,7 +43,8 @@ export enum StoryVideoTaskStatus {
 export enum StoryVideoTaskType {
   TTS = 'TTS',
   IMAGE = 'IMAGE',
-  TEXT = 'TEXT'
+  TEXT = 'TEXT',
+  SUBTITLE = 'SUBTITLE'
 }
 
 export interface StoryVideoTaskDDBItem {

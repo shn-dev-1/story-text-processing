@@ -74,6 +74,7 @@ resource "aws_lambda_function" "story_text_processing_lambda" {
       STORY_VIDEO_TASKS_DYNAMODB_TABLE = data.aws_dynamodb_table.story_video_tasks.name
       OPENAI_API_KEY                   = var.openai_api_key
       S3_BUCKET_NAME                   = data.terraform_remote_state.shared_infrastructure.outputs.s3_bucket_name
+      SNS_TOPIC_ARN                    = data.terraform_remote_state.shared_infrastructure.outputs.sns_topic_arn
     }
   }
 }
@@ -177,6 +178,25 @@ resource "aws_iam_role_policy" "story_text_processing_lambda_s3" {
           data.aws_s3_bucket.story_video_data.arn,
           "${data.aws_s3_bucket.story_video_data.arn}/*"
         ]
+      }
+    ]
+  })
+}
+
+# Create custom policy for SNS permissions
+resource "aws_iam_role_policy" "story_text_processing_lambda_sns" {
+  name = "story-text-processing-lambda-sns-policy"
+  role = aws_iam_role.story_text_processing_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = data.terraform_remote_state.shared_infrastructure.outputs.sns_topic_arn
       }
     ]
   })

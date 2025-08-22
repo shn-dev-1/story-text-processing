@@ -2,6 +2,7 @@ import { SQSBatchResponse } from 'aws-lambda';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, UpdateCommand, UpdateCommandInput, PutCommand, PutCommandInput, BatchWriteCommand, QueryCommand, QueryCommandOutput } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import OpenAI from 'openai';
 import { StoryTextEvent, StoryMetaDataStatus, StoryVideoTaskStatus, StoryVideoTaskDDBItem, StoryVideoTaskType, StorySegment } from './index.types';
 import * as fs from 'fs';
@@ -12,6 +13,7 @@ import { randomBytes } from 'crypto';
 const dynamoClient = new DynamoDBClient({});
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
 const s3Client = new S3Client({});
+const snsClient = new SNSClient({});
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -101,11 +103,15 @@ async function processMessage(record: any): Promise<void> {
 
         // Batch create video-task records for TTS and images based on validated segments
         const videoTaskRecords: StoryVideoTaskDDBItem[] = [];
+        const ttsSrtPairs: Array<{ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecord: StoryVideoTaskDDBItem}> = [];
         
-        // Create TTS tasks for each text segment
+        // Create TTS and SRT tasks for each text segment
         validatedStorySegments.forEach(segment => {
           const ttsTaskRecord = makeVideoTaskRecord(message.id, segment.text, StoryVideoTaskType.TTS, StoryVideoTaskStatus.PENDING);
+          const srtTaskRecord = makeVideoTaskRecord(message.id, `${message.id}-${ttsTaskRecord.task_id}`, StoryVideoTaskType.SUBTITLE, StoryVideoTaskStatus.PENDING);
           videoTaskRecords.push(ttsTaskRecord);
+          videoTaskRecords.push(srtTaskRecord);
+          ttsSrtPairs.push({ttsTaskRecord, srtTaskRecord});
         });
         
         // Create IMAGE tasks for each image prompt
@@ -127,7 +133,12 @@ async function processMessage(record: any): Promise<void> {
         
         // Update metadata record with task IDs organized by type and set status to COMPLETED
         await updateStoryMetadataRecordWithTaskIds(message.id, taskIdsByType);
-        //TODO: Send SNS message for all text video task records
+        
+        // Send SNS messages for all TTS tasks
+        for (const pair of ttsSrtPairs) {
+          await sendSNSMessage(pair.ttsTaskRecord, pair.srtTaskRecord);
+        }
+
     } catch (error) {
         console.error('Error processing text:', error);
         await updateStoryMetadataRecord(message.id, StoryMetaDataStatus.FAILED);
@@ -490,6 +501,39 @@ async function uploadStoryResponseToS3(storyId: string, taskId: string, processe
   // Return the S3 URI of the created object
   const s3Uri = `s3://${bucketName}/${key}`;
   return s3Uri;
+}
+
+async function sendSNSMessage(ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
+  const snsTopicArn = process.env['SNS_TOPIC_ARN'];
+  if (!snsTopicArn) {
+    throw new Error('SNS_TOPIC_ARN environment variable is not set');
+  }
+
+  const messageBody = {
+    text: ttsTaskRecord.source_prompt,
+    parent_id: ttsTaskRecord.id,
+    tts_task_id: ttsTaskRecord.task_id,
+    srt_task_id: srtTaskRecord.task_id
+  };
+
+  const publishParams = {
+    TopicArn: snsTopicArn,
+    Message: JSON.stringify(messageBody),
+    MessageAttributes: {
+      TASK_TYPE: {
+        DataType: 'String',
+        StringValue: 'TTS'
+      }
+    }
+  };
+
+  try {
+    await snsClient.send(new PublishCommand(publishParams));
+    console.log(`SNS message sent successfully for TTS task ${ttsTaskRecord.task_id}`);
+  } catch (error) {
+    console.error(`Error sending SNS message for TTS task ${ttsTaskRecord.task_id}:`, error);
+    throw error;
+  }
 }
 
 
