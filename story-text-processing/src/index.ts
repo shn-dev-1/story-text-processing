@@ -102,28 +102,30 @@ async function processMessage(record: any): Promise<void> {
         console.log(`Message ${record.messageId} processed successfully`);
 
         // Batch create video-task records for TTS and images based on validated segments
-        const videoTaskRecords: StoryVideoTaskDDBItem[] = [];
+        const allVideoTaskRecords: StoryVideoTaskDDBItem[] = [];
         const ttsSrtPairs: Array<{ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecord: StoryVideoTaskDDBItem}> = [];
+        const imageTaskRecords: StoryVideoTaskDDBItem[] = [];
         
         // Create TTS and SRT tasks for each text segment
         validatedStorySegments.forEach(segment => {
           const ttsTaskRecord = makeVideoTaskRecord(message.id, segment.text, StoryVideoTaskType.TTS, StoryVideoTaskStatus.PENDING);
           const srtTaskRecord = makeVideoTaskRecord(message.id, `${message.id}-${ttsTaskRecord.task_id}`, StoryVideoTaskType.SUBTITLE, StoryVideoTaskStatus.PENDING);
-          videoTaskRecords.push(ttsTaskRecord);
-          videoTaskRecords.push(srtTaskRecord);
+          allVideoTaskRecords.push(ttsTaskRecord);
+          allVideoTaskRecords.push(srtTaskRecord);
           ttsSrtPairs.push({ttsTaskRecord, srtTaskRecord});
         });
         
         // Create IMAGE tasks for each image prompt
         validatedStorySegments.forEach(segment => {
           const imageTaskRecord = makeVideoTaskRecord(message.id, segment.imagePrompt, StoryVideoTaskType.IMAGE, StoryVideoTaskStatus.PENDING);
-          videoTaskRecords.push(imageTaskRecord);
+          allVideoTaskRecords.push(imageTaskRecord);
+          imageTaskRecords.push(imageTaskRecord);
         });
         
-        await batchCreateVideoTaskRecords(videoTaskRecords);
+        await batchCreateVideoTaskRecords(allVideoTaskRecords);
         
         // Create a map of task types to arrays of task IDs
-        const taskIdsByType = createTaskIdsMap(textVideoTaskRecord, videoTaskRecords);
+        const taskIdsByType = createTaskIdsMap(textVideoTaskRecord, allVideoTaskRecords);
         
         // Set text video task record to complete with S3 URI
         await updateVideoTaskRecordStatus(textVideoTaskRecord.id, textVideoTaskRecord.task_id, StoryVideoTaskStatus.COMPLETED, textResponseS3Uri);
@@ -136,7 +138,11 @@ async function processMessage(record: any): Promise<void> {
         
         // Send SNS messages for all TTS tasks
         for (const pair of ttsSrtPairs) {
-          await sendSNSMessage(pair.ttsTaskRecord, pair.srtTaskRecord);
+          await sendSNSMessageForTTSTask(pair.ttsTaskRecord, pair.srtTaskRecord);
+        }
+
+        for(const imageTaskRecord of imageTaskRecords) {
+          await sendSNSMessageForImageTask(imageTaskRecord);
         }
 
     } catch (error) {
@@ -506,7 +512,7 @@ async function uploadStoryResponseToS3(storyId: string, taskId: string, processe
   return s3Uri;
 }
 
-async function sendSNSMessage(ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
+async function sendSNSMessageForTTSTask(ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
   const snsTopicArn = process.env['SNS_TOPIC_ARN'];
   if (!snsTopicArn) {
     throw new Error('SNS_TOPIC_ARN environment variable is not set');
@@ -539,4 +545,35 @@ async function sendSNSMessage(ttsTaskRecord: StoryVideoTaskDDBItem, srtTaskRecor
   }
 }
 
+async function sendSNSMessageForImageTask(imageTaskRecord: StoryVideoTaskDDBItem): Promise<void> {
+  const snsTopicArn = process.env['SNS_TOPIC_ARN'];
+  if (!snsTopicArn) {
+    throw new Error('SNS_TOPIC_ARN environment variable is not set');
+  }
+
+  const messageBody = {
+    prompt: imageTaskRecord.source_prompt,
+    parent_id: imageTaskRecord.id,
+    task_id: imageTaskRecord.task_id
+  };
+
+  const publishParams = {
+    TopicArn: snsTopicArn,
+    Message: JSON.stringify(messageBody),
+    MessageAttributes: {
+      TASK_TYPE: {
+        DataType: 'String',
+        StringValue: 'IMAGE'
+      }
+    }
+  };
+
+  try {
+    await snsClient.send(new PublishCommand(publishParams));
+    console.log(`SNS message sent successfully for Image task ${imageTaskRecord.task_id}`);
+  } catch (error) {
+    console.error(`Error sending SNS message for Image task ${imageTaskRecord.task_id}:`, error);
+    throw error;
+  }
+}
 
