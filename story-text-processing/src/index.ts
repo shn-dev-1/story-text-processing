@@ -483,8 +483,8 @@ async function uploadStoryResponseToS3(storyId: string, taskId: string, processe
     throw new Error('S3_BUCKET_NAME environment variable is not set');
   }
   
-  // Create folder structure: <storyId>/<taskId>_story_response.json
-  const key = `${storyId}/${taskId}_${StoryVideoTaskType.TEXT}.json`;
+  // Create folder structure: <storyId>/<taskId>.json
+  const key = `${storyId}/${taskId}.json`;
   
   const uploadParams = {
     Bucket: bucketName,
